@@ -87,6 +87,12 @@ footer{margin-top:40px;border-top:3px solid transparent;
 .ft-top{margin-top:16px;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:800;color:var(--mut);
   background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;transition:.15s}
 .ft-top:hover{color:var(--navy);border-color:var(--navy);box-shadow:var(--shadow)}
+/* 저장 상태 토스트 */
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);z-index:200;
+  background:var(--bad);color:#fff;font-weight:800;font-size:13px;padding:12px 18px;border-radius:12px;
+  box-shadow:0 12px 34px rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:.25s;max-width:90vw;text-align:center;line-height:1.4}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{background:var(--ok)}
 
 header{position:relative;z-index:1;padding:24px 16px 6px;max-width:980px;margin:0 auto}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -943,11 +949,14 @@ function onEntryInput(el){
 }
 function onEntrySave(el){
   const row=el.closest('.stu-row'), key=el.dataset.sk, ev=el.dataset.ek;
+  let p;
   if(EVENTS[ev].measures===2){
     const ins=[...row.querySelectorAll('.entry-in')];
-    saveRecord2(key,ev, ins[0]?ins[0].value.trim():"", ins[1]?ins[1].value.trim():"");
-  } else saveRecord(key,ev,el.value.trim());
-  el.style.outline='2px solid var(--ok)'; setTimeout(()=>{ el.style.outline=''; },700);
+    p=saveRecord2(key,ev, ins[0]?ins[0].value.trim():"", ins[1]?ins[1].value.trim():"");
+  } else p=saveRecord(key,ev,el.value.trim());
+  const ok=()=>{ el.style.outline='2px solid var(--ok)'; setTimeout(()=>{ el.style.outline=''; },700); };
+  const bad=()=>{ el.style.outline='2px solid var(--bad)'; toast('⚠ 저장 실패 — 인터넷·로그인 상태를 확인하세요'); };
+  if(p&&p.then) p.then(ok).catch(bad); else ok();
 }
 function refreshEntryQuiet(){ // 원격 갱신 시 입력 중인 칸은 건드리지 않고 나머지만 동기화
   const active=document.activeElement;
@@ -1071,7 +1080,7 @@ function saveStu(){
     selGroup:g('c-sgrp').trim(), selNo:g('c-sno').trim(), optSel:cardOpts.slice() };
   // 1) 기본정보: 메모리 반영 + (Firebase) 해당 필드만 merge → 기록/시기 노드는 건드리지 않음
   Object.assign(s, info);
-  if(!IS_DEMO && db) db.ref('students/'+s.key).update(info);
+  if(!IS_DEMO && db) db.ref('students/'+s.key).update(info).catch(onWriteErr);
   // 2) 기록/시기: 카드에서 '바뀐' 종목만 종목별로 저장 → 안 건드린 종목은 다른 기기 입력을 덮어쓰지 않음
   const snap=cardSnap||{records:{},attempts:{}};
   ALLEV.forEach(k=>{ const e=EVENTS[k], vals=cardRowVals(k);
@@ -1080,11 +1089,11 @@ function saveStu(){
       const sa=(snap.attempts&&snap.attempts[k]&&snap.attempts[k].a!=null)?String(snap.attempts[k].a):"";
       const sb=(snap.attempts&&snap.attempts[k]&&snap.attempts[k].b!=null)?String(snap.attempts[k].b):"";
       const sa2=sa||((snap.records&&snap.records[k]!=null&&!(snap.attempts&&snap.attempts[k]))?String(snap.records[k]):"");
-      if(a!==sa2 || b!==sb) saveRecord2(s.key,k,a,b);
+      if(a!==sa2 || b!==sb){ const _p=saveRecord2(s.key,k,a,b); if(_p&&_p.catch)_p.catch(onWriteErr); }
     } else {
       const v=vals[0]||"";
       const sv=(snap.records&&snap.records[k]!=null)?String(snap.records[k]):"";
-      if(v!==sv) saveRecord(s.key,k,v);
+      if(v!==sv){ const _p=saveRecord(s.key,k,v); if(_p&&_p.catch)_p.catch(onWriteErr); }
     }
   });
   if(IS_DEMO) refreshAll();
@@ -1220,82 +1229,46 @@ function parseXlsx(file){
 function bulkAddStudents(arr){
   if(!IS_ADMIN){ alert('관리자만 등록할 수 있습니다.'); return; }
   if(IS_DEMO){ arr.forEach(s=>students.push(s)); refreshAll(); renderAdmin(); }
-  else { const obj={}; arr.forEach(s=>{ const c={...s}; delete c.key; obj[s.key]=c; }); db.ref('students').update(obj); }
+  else { const obj={}; arr.forEach(s=>{ const c={...s}; delete c.key; obj[s.key]=c; }); db.ref('students').update(obj).catch(onWriteErr); }
   alert(arr.length+'명 등록 완료'); renderAdmin();
-}
-/* ── 테스트용 더미 데이터 ── */
-function genDummy(){
-  if(!IS_ADMIN){ alert('관리자만 사용할 수 있습니다.'); return; }
-  confirmBox('더미 데이터 생성','테스트용 학생 40명(랜덤 기록 포함)을 추가합니다. 계속할까요?',()=>{
-    const SUR="김이박최정강조윤장임".split("");
-    const GIV=["민준","서연","도윤","하은","지호","수아","예준","지우","주원","서윤","건우","채원","현우","유진","지훈","다은","승현","서현","준서","하린"];
-    const SCHOOLS=["순천고","여수고","목포고","광양제철고","나주고","화순고","해남고","무안고"];
-    const REGIONS=["순천","여수","목포","광양","나주","화순","해남","무안"];
-    const RANGE={ // [남min,남max,여min,여max]
-      jump:[225,320,180,265], shuttle:[7.6,10.4,8.6,11.4], flex:[12,34,16,38], medball:[7,14,6,12],
-      back:[7,14,6,12], zigzag:[12.8,18,14.8,20], situp:[40,78,36,72], sargent:[46,82,26,62] };
-    const rnd=(a,b)=>a+Math.random()*(b-a);
-    const fmt=(k,v)=>{ const st=EVENTS[k].step; if(st>=1) return String(Math.round(v)); return (Math.round(v*10)/10).toFixed(1); };
-    const grpCount={1:0,2:0,3:0,4:0}; const selCount={1:0,2:0,3:0,4:0,5:0,6:0};
-    const out=[]; const N=40;
-    for(let i=0;i<N;i++){
-      const g=Math.random()<0.5?'m':'f';
-      const grp=(i%4)+1; grpCount[grp]++;
-      const name=SUR[Math.floor(rnd(0,SUR.length))]+GIV[Math.floor(rnd(0,GIV.length))];
-      const si=Math.floor(rnd(0,SCHOOLS.length));
-      // 공통 4종목: 85% 확률로 기록 입력(일부 미입력으로 부분상태 테스트)
-      const records={};
-      COMMON.forEach(k=>{ if(Math.random()<0.85){ const r=RANGE[k]; records[k]=fmt(k, g==='m'?rnd(r[0],r[1]):rnd(r[2],r[3])); } });
-      // 선택종목: 70% 확률로 2개 신청 + 기록
-      let optSel=[], selGroup="", selNo="";
-      if(Math.random()<0.7){
-        const pool=[...OPTIONAL].sort(()=>Math.random()-0.5).slice(0,2);
-        optSel=pool;
-        const sg=Math.floor(rnd(1,7)); selGroup=String(sg); selCount[sg]++; selNo=String(selCount[sg]);
-        pool.forEach(k=>{ if(Math.random()<0.8){ const r=RANGE[k]; records[k]=fmt(k, g==='m'?rnd(r[0],r[1]):rnd(r[2],r[3])); } });
-      }
-      const yy=String(Math.floor(rnd(7,9))).padStart(2,'0'); // 07~08
-      const mm=String(Math.floor(rnd(1,13))).padStart(2,'0');
-      const dd=String(Math.floor(rnd(1,29))).padStart(2,'0');
-      out.push({ key:uid(), name, gender:g, school:SCHOOLS[si], region:REGIONS[si],
-        grade:String(Math.floor(rnd(1,4))), klass:String(Math.floor(rnd(1,9))),
-        group:String(grp), commonNo:String(grpCount[grp]), selGroup, selNo,
-        birth:yy+mm+dd, phone:"010-0000-"+String(1000+i), optSel, records, attempts:{}, ts:Date.now()+i });
-    }
-    bulkAddStudents(out);
-  });
 }
 
 function delStu(key){ const s=students.find(x=>x.key===key);
   confirmBox("학생 삭제",(s?s.name:"")+" 학생을 삭제합니다.",()=>{ if(stuSel===key) stuSel=null; removeStudent(key); renderAdmin(); }); }
 function resetAll(){ confirmBox("전체 초기화","모든 학생·기록이 삭제됩니다. 계속할까요?",()=>{
-  if(IS_DEMO){ students=[]; } else students.forEach(s=>db.ref('students/'+s.key).remove());
+  if(IS_DEMO){ students=[]; } else students.forEach(s=>db.ref('students/'+s.key).remove().catch(onWriteErr));
   if(IS_DEMO){ refreshAll(); } }); }
 
 /* ── 저장 (Firebase / 데모) ── */
+let _toastT=null;
+function toast(msg,ok){ const t=document.getElementById('toast'); if(!t)return;
+  t.textContent=msg; t.classList.toggle('ok',!!ok); t.classList.add('show');
+  if(_toastT)clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove('show'),3800); }
+function onWriteErr(e){ console.error('Firebase 쓰기 실패:',e); toast('⚠ 저장 실패 — 인터넷·로그인 상태를 확인하세요'); }
 function addStudent(s){ if(!IS_ADMIN)return;
-  if(IS_DEMO){ students.push(s); refreshAll(); } else db.ref('students/'+s.key).set(s); }
+  if(IS_DEMO){ students.push(s); refreshAll(); } else db.ref('students/'+s.key).set(s).catch(onWriteErr); }
 function saveStudent(s){ if(!IS_ADMIN)return;
-  if(IS_DEMO){ students=students.map(x=>x.key===s.key?s:x); refreshAll(); } else db.ref('students/'+s.key).set(s); }
+  if(IS_DEMO){ students=students.map(x=>x.key===s.key?s:x); refreshAll(); } else db.ref('students/'+s.key).set(s).catch(onWriteErr); }
 function removeStudent(key){ if(!IS_ADMIN)return;
-  if(IS_DEMO){ students=students.filter(x=>x.key!==key); refreshAll(); } else db.ref('students/'+key).remove(); }
-/* 종목 1칸만 저장 → 여러 노트북이 서로 다른 종목을 동시에 입력해도 충돌 없음 */
-function saveRecord(key,ev,val){ if(!IS_ADMIN)return;
-  const s=students.find(x=>x.key===key); if(!s)return; s.records=s.records||{};
+  if(IS_DEMO){ students=students.filter(x=>x.key!==key); refreshAll(); } else db.ref('students/'+key).remove().catch(onWriteErr); }
+/* 종목 1칸만 저장 → 여러 노트북이 서로 다른 종목을 동시에 입력해도 충돌 없음. 라이브에선 쓰기 Promise 반환 */
+function saveRecord(key,ev,val){ if(!IS_ADMIN)return null;
+  const s=students.find(x=>x.key===key); if(!s)return null; s.records=s.records||{};
   if(val===""||val==null) delete s.records[ev]; else s.records[ev]=val;
-  if(IS_DEMO){ /* 메모리 반영 완료 (라이브 점수는 화면에서 즉시 갱신됨) */ }
-  else { const ref=db.ref('students/'+key+'/records/'+ev); (val===""||val==null)?ref.remove():ref.set(val); }
+  if(IS_DEMO) return null;
+  const ref=db.ref('students/'+key+'/records/'+ev);
+  return (val===""||val==null)?ref.remove():ref.set(val);
 }
 /* 2회 측정 종목: 두 기록을 저장하고 더 좋은 기록을 점수용 records에 반영 */
-function saveRecord2(key,ev,a,b){ if(!IS_ADMIN)return;
-  const s=students.find(x=>x.key===key); if(!s)return; s.attempts=s.attempts||{}; s.records=s.records||{};
+function saveRecord2(key,ev,a,b){ if(!IS_ADMIN)return null;
+  const s=students.find(x=>x.key===key); if(!s)return null; s.attempts=s.attempts||{}; s.records=s.records||{};
   const best=bestOf(EVENTS[ev].dir,[a,b]);
   if(!a&&!b){ delete s.attempts[ev]; delete s.records[ev]; }
   else { s.attempts[ev]={a:a||"",b:b||""}; if(best==="") delete s.records[ev]; else s.records[ev]=best; }
-  if(IS_DEMO){ /* 메모리 반영 */ }
-  else { const aRef=db.ref('students/'+key+'/attempts/'+ev), rRef=db.ref('students/'+key+'/records/'+ev);
-    if(!a&&!b){ aRef.remove(); rRef.remove(); }
-    else { aRef.set({a:a||"",b:b||""}); (best===""?rRef.remove():rRef.set(best)); } }
+  if(IS_DEMO) return null;
+  const aRef=db.ref('students/'+key+'/attempts/'+ev), rRef=db.ref('students/'+key+'/records/'+ev);
+  if(!a&&!b) return Promise.all([aRef.remove(), rRef.remove()]);
+  return Promise.all([ aRef.set({a:a||"",b:b||""}), (best===""?rRef.remove():rRef.set(best)) ]);
 }
 
 /* ── 공지사항 (실시간) ── */
@@ -1342,14 +1315,14 @@ function addNotice(){
   const d=new Date(), tm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
   const obj={type,text:txt,time:tm,ts:Date.now()};
   if(IS_DEMO){ notices.unshift({...obj,key:'d'+Date.now()}); renderNotices(); }
-  else db.ref('notices').push(obj);
+  else db.ref('notices').push(obj).catch(onWriteErr);
   document.getElementById('nText').value='';
 }
 function delNotice(k){
   if(!IS_ADMIN)return;
   confirmBox("공지 삭제","이 공지를 삭제합니다.",()=>{
     if(IS_DEMO){ notices=notices.filter(n=>n.key!==k); renderNotices(); }
-    else db.ref('notices/'+k).remove();
+    else db.ref('notices/'+k).remove().catch(onWriteErr);
   });
 }
 function noticePanelHTML(){
@@ -1479,5 +1452,6 @@ fetchWeather();
 setInterval(()=>{ renderInfo(); renderHomeNow(); },30000);
 setInterval(fetchWeather,600000);
 </script>
+<div id="toast" class="toast"></div>
 </body>
 </html>
